@@ -13,45 +13,85 @@
     <!-- ═══════════════════════════════════════════════════════════════════════════
          CONNECTOR INPUTS
          
-         Simplified contract:
-         - apiSecretKey: Optional API key for authentication (Bearer token)
-         - input: Main input data as Map (mandatory)
-         - params: Optional parameters for agent customization
-         - timeoutMs: Request timeout in milliseconds
+         RAG Agent API Contract:
+         - agentUrl: Agent API endpoint URL
+         - authToken: JWT Bearer token for authentication
+         - question: The question to ask the RAG agent
+         - llmApiKey: OpenAI/Anthropic API key
+         - llmModel: LLM model name (default: gpt-4o-mini)
+         - topK: Documents to retrieve, 1-10 (default: 3)
+         - minConfidence: Confidence threshold, 0.0-1.0 (default: 0.0)
+         - requireSources: Include sources in response (default: true)
+         - timeoutMs: Request timeout in milliseconds (default: 30000)
+         - maxTokens: Max response tokens (default: 700)
+         - temperature: LLM temperature (default: 0.1)
          ═══════════════════════════════════════════════════════════════════════════ -->
     
-    <!-- API Secret Key: Optional authentication key for secured agent endpoints -->
-    <input mandatory="false" name="apiSecretKey" type="java.lang.String"/>
+    <!-- Agent API URL: The endpoint URL for the RAG agent -->
+    <input mandatory="true" name="agentUrl" type="java.lang.String"/>
     
-    <!-- Input: The main input data as a Map/JSON object (e.g., {"question": "..."}) -->
-    <input mandatory="true" name="input" type="java.util.Map"/>
+    <!-- Auth Token: JWT Bearer token for authentication (can be empty if auth disabled) -->
+    <input mandatory="false" name="authToken" type="java.lang.String"/>
     
-    <!-- Params: Optional parameters for the agent (e.g., {"top_k": 3, "min_confidence": 0.65}) -->
-    <input mandatory="false" name="params" type="java.util.Map"/>
+    <!-- Question: The question to ask the RAG agent (mandatory) -->
+    <input mandatory="true" name="question" type="java.lang.String"/>
     
-    <!-- Timeout: Request timeout in milliseconds (default: 30000) -->
-    <input mandatory="false" name="timeoutMs" type="java.lang.Integer" defaultValue="30000"/>
+    <!-- LLM API Key: OpenAI/Anthropic API key (mandatory) -->
+    <input mandatory="true" name="llmApiKey" type="java.lang.String"/>
+    
+    <!-- LLM Model: Model name (default: gpt-4o-mini) -->
+    <input mandatory="false" name="llmModel" type="java.lang.String"/>
+    
+    <!-- Top K: Number of documents to retrieve (default: 3, range: 1-10) -->
+    <input mandatory="false" name="topK" type="java.lang.Integer"/>
+    
+    <!-- Min Confidence: Confidence threshold (default: 0.0, range: 0.0-1.0) -->
+    <input mandatory="false" name="minConfidence" type="java.lang.Double"/>
+    
+    <!-- Require Sources: Include sources in response (default: true) -->
+    <input mandatory="false" name="requireSources" type="java.lang.Boolean"/>
+    
+    <!-- Timeout: Request timeout in milliseconds (default: 30000, range: 1000-300000) -->
+    <input mandatory="false" name="timeoutMs" type="java.lang.Integer"/>
+    
+    <!-- Max Tokens: Maximum response tokens (default: 700, range: 100-4000) -->
+    <input mandatory="false" name="maxTokens" type="java.lang.Integer"/>
+    
+    <!-- Temperature: LLM temperature for response generation (default: 0.1, range: 0.0-2.0) -->
+    <input mandatory="false" name="temperature" type="java.lang.Double"/>
     
     <!-- ═══════════════════════════════════════════════════════════════════════════
          CONNECTOR OUTPUTS
          
          Response contract:
          - status: ok | low_confidence | error
-         - output: Main result (answer, sources, confidence, reasoning)
-         - usage: Performance metrics (latency_ms, tokens, model)
-         - error: Error message if failed, null otherwise
+         - answer: The agent's answer text
+         - sources: List of source documents used
+         - confidence: Confidence score (0.0-1.0)
+         - reasoning: Explanation of how the answer was derived
+         - errorCode: Error code if status=error
+         - errorMessage: Human-readable error message if status=error
          ═══════════════════════════════════════════════════════════════════════════ -->
     
-    <!-- Status: Response status from the agent -->
+    <!-- Status: Response status from the agent (ok, low_confidence, or error) -->
     <output name="status" type="java.lang.String"/>
     
-    <!-- Output: Main result containing answer, sources, confidence, reasoning -->
-    <output name="output" type="java.util.Map"/>
+    <!-- Answer: The agent's answer text -->
+    <output name="answer" type="java.lang.String"/>
     
-    <!-- Usage: Performance metrics -->
-    <output name="usage" type="java.util.Map"/>
+    <!-- Sources: List of source documents used (List of Maps with title/version) -->
+    <output name="sources" type="java.util.List"/>
     
-    <!-- Error: Error message if the request failed, null otherwise -->
-    <output name="error" type="java.lang.String"/>
+    <!-- Confidence: Confidence score (0.0-1.0) -->
+    <output name="confidence" type="java.lang.Double"/>
+    
+    <!-- Reasoning: Explanation of how the answer was derived -->
+    <output name="reasoning" type="java.lang.String"/>
+    
+    <!-- Error Code: Error code if the request failed (e.g., VALIDATION_ERROR, LLM_ERROR) -->
+    <output name="errorCode" type="java.lang.String"/>
+    
+    <!-- Error Message: Human-readable error message if the request failed -->
+    <output name="errorMessage" type="java.lang.String"/>
     
 </definition:ConnectorDefinition>

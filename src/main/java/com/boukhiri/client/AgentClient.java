@@ -30,11 +30,18 @@ public interface AgentClient {
     AgentResponse sendRequest(AgentRequest request) throws AgentCommunicationException;
 
     /**
-     * Configures the API secret key for authentication.
+     * Configures the agent API URL.
      * 
-     * @param apiSecretKey The secret key (will be sent as Bearer token)
+     * @param agentUrl The agent API endpoint URL
      */
-    void setApiSecretKey(String apiSecretKey);
+    void setAgentUrl(String agentUrl);
+
+    /**
+     * Configures the JWT Bearer token for authentication.
+     * 
+     * @param authToken The JWT Bearer token (will be sent as Authorization: Bearer token)
+     */
+    void setAuthToken(String authToken);
 
     /**
      * Configures the request timeout.
@@ -50,4 +57,3 @@ public interface AgentClient {
      */
     boolean isConfigured();
 }
-

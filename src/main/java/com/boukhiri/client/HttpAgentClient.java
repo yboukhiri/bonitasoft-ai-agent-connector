@@ -18,12 +18,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * HTTP implementation of the AgentClient interface.
+ * HTTP implementation of the AgentClient interface for the RAG Agent API.
  * 
  * <p>This class handles all HTTP communication with the AI Agent, including:</p>
  * <ul>
- *   <li>Request serialization (Java Map to JSON)</li>
- *   <li>HTTP POST with proper headers</li>
+ *   <li>Request serialization (AgentRequest to JSON)</li>
+ *   <li>HTTP POST with proper headers (Content-Type, Authorization)</li>
  *   <li>Response parsing (JSON to AgentResponse)</li>
  *   <li>Error handling and timeout management</li>
  * </ul>
@@ -38,22 +38,20 @@ public class HttpAgentClient implements AgentClient {
 
     private static final Logger LOGGER = Logger.getLogger(HttpAgentClient.class.getName());
 
-    private final String agentUrl;
-    private final HttpClient httpClient;
-    private String apiSecretKey;
+    private String agentUrl;
+    private String authToken;
     private int timeoutMs;
+    private HttpClient httpClient;
 
     /**
-     * Creates a new HttpAgentClient with the default agent URL.
+     * Creates a new HttpAgentClient with default settings.
      * 
-     * <p>The URL is resolved in this order:</p>
-     * <ol>
-     *   <li>Environment variable AI_AGENT_URL if set</li>
-     *   <li>Default value: http://localhost:8000/run</li>
-     * </ol>
+     * <p>The client must be configured with {@link #setAgentUrl(String)} before use.</p>
      */
     public HttpAgentClient() {
-        this(resolveAgentUrl());
+        this.timeoutMs = ConnectorConstants.DEFAULT_TIMEOUT_MS;
+        this.agentUrl = ConnectorConstants.DEFAULT_AGENT_URL;
+        initHttpClient();
     }
 
     /**
@@ -64,42 +62,25 @@ public class HttpAgentClient implements AgentClient {
     public HttpAgentClient(String agentUrl) {
         this.agentUrl = agentUrl;
         this.timeoutMs = ConnectorConstants.DEFAULT_TIMEOUT_MS;
+        initHttpClient();
+    }
+
+    /**
+     * Initializes the HTTP client with current timeout settings.
+     */
+    private void initHttpClient() {
         this.httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofMillis(timeoutMs))
                 .build();
-        
-        LOGGER.info("HttpAgentClient initialized with URL: " + agentUrl);
-    }
-
-    /**
-     * Resolves the agent URL from environment/system property or defaults.
-     * 
-     * <p>Resolution order:</p>
-     * <ol>
-     *   <li>System property AI_AGENT_URL (for testing)</li>
-     *   <li>Environment variable AI_AGENT_URL</li>
-     *   <li>Default: http://localhost:8000/run</li>
-     * </ol>
-     */
-    private static String resolveAgentUrl() {
-        // Check system property first (useful for testing)
-        String propUrl = System.getProperty(ConnectorConstants.ENV_AGENT_URL);
-        if (propUrl != null && !propUrl.trim().isEmpty()) {
-            return propUrl.trim();
-        }
-        
-        // Then check environment variable
-        String envUrl = System.getenv(ConnectorConstants.ENV_AGENT_URL);
-        if (envUrl != null && !envUrl.trim().isEmpty()) {
-            return envUrl.trim();
-        }
-        
-        return ConnectorConstants.DEFAULT_AGENT_URL;
     }
 
     @Override
     public AgentResponse sendRequest(AgentRequest request) throws AgentCommunicationException {
+        if (agentUrl == null || agentUrl.trim().isEmpty()) {
+            throw new AgentCommunicationException("Agent URL is not configured");
+        }
+
         LOGGER.info("Sending request to AI Agent: " + agentUrl);
         
         try {
@@ -115,10 +96,10 @@ public class HttpAgentClient implements AgentClient {
                     .header("Accept", ConnectorConstants.CONTENT_TYPE_JSON)
                     .POST(HttpRequest.BodyPublishers.ofString(jsonPayload));
             
-            // Add authorization header if API key is set
-            if (apiSecretKey != null && !apiSecretKey.trim().isEmpty()) {
+            // Add authorization header if auth token is set
+            if (authToken != null && !authToken.trim().isEmpty()) {
                 requestBuilder.header("Authorization", 
-                        ConnectorConstants.AUTH_BEARER_PREFIX + apiSecretKey.trim());
+                        ConnectorConstants.AUTH_BEARER_PREFIX + authToken.trim());
                 LOGGER.fine("Authorization header added");
             }
             
@@ -130,15 +111,16 @@ public class HttpAgentClient implements AgentClient {
                     HttpResponse.BodyHandlers.ofString());
             long latencyMs = System.currentTimeMillis() - startTime;
             
-            LOGGER.info(String.format("Agent responded in %dms with status %d", 
+            LOGGER.info(String.format("Agent responded in %dms with HTTP status %d", 
                     latencyMs, response.statusCode()));
             
             // Process response
-            return processResponse(response, latencyMs);
+            return processResponse(response);
             
         } catch (HttpTimeoutException e) {
             LOGGER.log(Level.WARNING, "Request timed out after " + timeoutMs + "ms", e);
-            throw new AgentCommunicationException("Request timed out after " + timeoutMs + "ms", e);
+            return AgentResponse.error(ConnectorConstants.ERROR_TIMEOUT, 
+                    "Request timed out after " + timeoutMs + "ms");
         } catch (IOException e) {
             LOGGER.log(Level.SEVERE, "Network error: " + e.getMessage(), e);
             throw new AgentCommunicationException("Network error: " + e.getMessage(), e);
@@ -151,17 +133,27 @@ public class HttpAgentClient implements AgentClient {
     /**
      * Processes the HTTP response and converts it to an AgentResponse.
      */
-    @SuppressWarnings("unchecked")
-    private AgentResponse processResponse(HttpResponse<String> response, long latencyMs) 
+    private AgentResponse processResponse(HttpResponse<String> response) 
             throws AgentCommunicationException {
         
         String body = response.body();
+        LOGGER.fine("Response body: " + body);
         
         // Check for HTTP errors
         if (response.statusCode() >= 400) {
-            throw new AgentCommunicationException(
-                    String.format("HTTP %d: %s", response.statusCode(), body),
-                    response.statusCode());
+            // Try to parse error response from body
+            try {
+                Map<String, Object> errorMap = JsonUtils.fromJson(body);
+                if (errorMap != null) {
+                    return AgentResponse.fromMap(errorMap);
+                }
+            } catch (Exception ignored) {
+                // Failed to parse, return generic error
+            }
+            
+            return AgentResponse.error(
+                    ConnectorConstants.ERROR_INTERNAL,
+                    String.format("HTTP %d: %s", response.statusCode(), body));
         }
         
         // Parse JSON response
@@ -170,48 +162,29 @@ public class HttpAgentClient implements AgentClient {
             throw new AgentCommunicationException("Empty or null response from agent");
         }
         
-        // Build AgentResponse
-        AgentResponse.Builder builder = AgentResponse.builder()
-                .status((String) responseMap.getOrDefault("status", ConnectorConstants.STATUS_OK));
-        
-        // Extract output
-        Object output = responseMap.get("output");
-        if (output instanceof Map) {
-            builder.output((Map<String, Object>) output);
-        }
-        
-        // Extract and enrich usage metrics
-        Object usage = responseMap.get("usage");
-        Map<String, Object> usageMap;
-        if (usage instanceof Map) {
-            usageMap = new java.util.HashMap<>((Map<String, Object>) usage);
-        } else {
-            usageMap = new java.util.HashMap<>();
-        }
-        // Ensure latency is recorded
-        if (!usageMap.containsKey("latency_ms")) {
-            usageMap.put("latency_ms", latencyMs);
-        }
-        builder.usage(usageMap);
-        
-        // Extract error
-        Object error = responseMap.get("error");
-        if (error != null) {
-            builder.error(error.toString());
-        }
-        
-        return builder.build();
+        // Convert to AgentResponse using the fromMap factory method
+        return AgentResponse.fromMap(responseMap);
     }
 
     @Override
-    public void setApiSecretKey(String apiSecretKey) {
-        this.apiSecretKey = apiSecretKey;
+    public void setAgentUrl(String agentUrl) {
+        this.agentUrl = agentUrl;
+        LOGGER.fine("Agent URL set to: " + agentUrl);
+    }
+
+    @Override
+    public void setAuthToken(String authToken) {
+        this.authToken = authToken;
+        LOGGER.fine("Auth token configured");
     }
 
     @Override
     public void setTimeoutMs(int timeoutMs) {
         if (timeoutMs > 0) {
             this.timeoutMs = timeoutMs;
+            // Recreate HTTP client with new timeout
+            initHttpClient();
+            LOGGER.fine("Timeout set to: " + timeoutMs + "ms");
         }
     }
 
@@ -228,5 +201,13 @@ public class HttpAgentClient implements AgentClient {
     public String getAgentUrl() {
         return agentUrl;
     }
-}
 
+    /**
+     * Gets the configured timeout in milliseconds.
+     * 
+     * @return The timeout in milliseconds
+     */
+    public int getTimeoutMs() {
+        return timeoutMs;
+    }
+}

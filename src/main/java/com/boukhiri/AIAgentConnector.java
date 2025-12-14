@@ -12,15 +12,16 @@ import org.bonitasoft.engine.connector.AbstractConnector;
 import org.bonitasoft.engine.connector.ConnectorException;
 import org.bonitasoft.engine.connector.ConnectorValidationException;
 
-import java.util.Map;
+import java.util.Collections;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * AI Agent Connector for Bonita BPM.
  * 
- * <p>This connector enables Bonita processes to communicate with external AI Agents
- * via HTTP POST requests. It supports RAG-based question answering and other AI tasks.</p>
+ * <p>This connector enables Bonita processes to communicate with a RAG (Retrieval-Augmented
+ * Generation) Agent via HTTP POST requests. It sends questions to the agent and retrieves
+ * answers with source documents and confidence scores.</p>
  * 
  * <h2>Architecture</h2>
  * <p>This class follows SOLID principles by acting as a thin orchestrator that
@@ -34,25 +35,35 @@ import java.util.logging.Logger;
  * <h2>Connector Lifecycle</h2>
  * <ol>
  *   <li>{@link #validateInputParameters()} - Validates inputs via InputValidator</li>
- *   <li>{@link #connect()} - Initializes the AgentClient</li>
+ *   <li>{@link #connect()} - Initializes the AgentClient with configuration</li>
  *   <li>{@link #executeBusinessLogic()} - Orchestrates the request/response flow</li>
  *   <li>{@link #disconnect()} - Cleanup</li>
  * </ol>
  * 
  * <h2>Inputs</h2>
  * <ul>
- *   <li><strong>input</strong> (Map, mandatory): The main input data (e.g., {question: "..."})</li>
- *   <li><strong>params</strong> (Map, optional): Parameters like top_k, min_confidence</li>
+ *   <li><strong>agentUrl</strong> (String, mandatory): Agent API URL</li>
+ *   <li><strong>authToken</strong> (String, optional): JWT Bearer token</li>
+ *   <li><strong>question</strong> (String, mandatory): The question to ask</li>
+ *   <li><strong>llmApiKey</strong> (String, mandatory): OpenAI/Anthropic API key</li>
+ *   <li><strong>llmModel</strong> (String, optional): Model name (default: gpt-4o-mini)</li>
+ *   <li><strong>topK</strong> (Integer, optional): Documents to retrieve (default: 3)</li>
+ *   <li><strong>minConfidence</strong> (Double, optional): Confidence threshold (default: 0.0)</li>
+ *   <li><strong>requireSources</strong> (Boolean, optional): Include sources (default: true)</li>
  *   <li><strong>timeoutMs</strong> (Integer, optional): Request timeout (default: 30000)</li>
- *   <li><strong>apiSecretKey</strong> (String, optional): API key for authentication</li>
+ *   <li><strong>maxTokens</strong> (Integer, optional): Max response tokens (default: 700)</li>
+ *   <li><strong>temperature</strong> (Double, optional): LLM temperature (default: 0.1)</li>
  * </ul>
  * 
  * <h2>Outputs</h2>
  * <ul>
  *   <li><strong>status</strong>: ok, low_confidence, or error</li>
- *   <li><strong>output</strong>: Contains answer, sources, confidence, reasoning</li>
- *   <li><strong>usage</strong>: Performance metrics</li>
- *   <li><strong>error</strong>: Error message if failed</li>
+ *   <li><strong>answer</strong>: The agent's answer text</li>
+ *   <li><strong>sources</strong>: List of source documents used</li>
+ *   <li><strong>confidence</strong>: Confidence score (0.0-1.0)</li>
+ *   <li><strong>reasoning</strong>: How the answer was derived</li>
+ *   <li><strong>errorCode</strong>: Error code if status=error</li>
+ *   <li><strong>errorMessage</strong>: Error message if status=error</li>
  * </ul>
  * 
  * @author Yassine Boukhiri
@@ -106,10 +117,17 @@ public class AIAgentConnector extends AbstractConnector {
         
         InputValidator validator = new InputValidator(
                 this,
-                () -> getInputParameter(ConnectorConstants.INPUT_DATA),
-                () -> getInputParameter(ConnectorConstants.INPUT_PARAMS),
+                () -> getInputParameter(ConnectorConstants.INPUT_AGENT_URL),
+                () -> getInputParameter(ConnectorConstants.INPUT_AUTH_TOKEN),
+                () -> getInputParameter(ConnectorConstants.INPUT_QUESTION),
+                () -> getInputParameter(ConnectorConstants.INPUT_LLM_API_KEY),
+                () -> getInputParameter(ConnectorConstants.INPUT_LLM_MODEL),
+                () -> getInputParameter(ConnectorConstants.INPUT_TOP_K),
+                () -> getInputParameter(ConnectorConstants.INPUT_MIN_CONFIDENCE),
+                () -> getInputParameter(ConnectorConstants.INPUT_REQUIRE_SOURCES),
                 () -> getInputParameter(ConnectorConstants.INPUT_TIMEOUT_MS),
-                () -> getInputParameter(ConnectorConstants.INPUT_API_SECRET_KEY)
+                () -> getInputParameter(ConnectorConstants.INPUT_MAX_TOKENS),
+                () -> getInputParameter(ConnectorConstants.INPUT_TEMPERATURE)
         );
         
         validator.validate();
@@ -131,9 +149,14 @@ public class AIAgentConnector extends AbstractConnector {
             }
             
             // Configure client with input parameters
-            String apiSecretKey = getStringInput(ConnectorConstants.INPUT_API_SECRET_KEY);
-            if (apiSecretKey != null) {
-                agentClient.setApiSecretKey(apiSecretKey);
+            String agentUrl = getStringInput(ConnectorConstants.INPUT_AGENT_URL);
+            if (agentUrl != null) {
+                agentClient.setAgentUrl(agentUrl);
+            }
+            
+            String authToken = getStringInput(ConnectorConstants.INPUT_AUTH_TOKEN);
+            if (authToken != null && !authToken.trim().isEmpty()) {
+                agentClient.setAuthToken(authToken);
             }
             
             Integer timeout = getIntegerInput(ConnectorConstants.INPUT_TIMEOUT_MS);
@@ -163,7 +186,6 @@ public class AIAgentConnector extends AbstractConnector {
      * @throws ConnectorException if execution fails critically
      */
     @Override
-    @SuppressWarnings("unchecked")
     protected void executeBusinessLogic() throws ConnectorException {
         LOGGER.info("Executing AI Agent request...");
         
@@ -181,7 +203,7 @@ public class AIAgentConnector extends AbstractConnector {
             
         } catch (AgentCommunicationException e) {
             LOGGER.log(Level.WARNING, "Agent communication failed: " + e.getMessage(), e);
-            setErrorOutputs(e.getMessage());
+            setErrorOutputs(ConnectorConstants.ERROR_INTERNAL, e.getMessage());
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Unexpected error: " + e.getMessage(), e);
             throw new ConnectorException("Failed to execute AI Agent request: " + e.getMessage(), e);
@@ -206,15 +228,48 @@ public class AIAgentConnector extends AbstractConnector {
     /**
      * Builds an AgentRequest from connector inputs.
      */
-    @SuppressWarnings("unchecked")
     private AgentRequest buildRequest() {
-        Map<String, Object> inputData = (Map<String, Object>) getInputParameter(ConnectorConstants.INPUT_DATA);
-        Map<String, Object> params = (Map<String, Object>) getInputParameter(ConnectorConstants.INPUT_PARAMS);
+        AgentRequest.Builder builder = AgentRequest.builder()
+                .question(getStringInput(ConnectorConstants.INPUT_QUESTION))
+                .llmApiKey(getStringInput(ConnectorConstants.INPUT_LLM_API_KEY));
         
-        return AgentRequest.builder()
-                .input(inputData)
-                .params(params)
-                .build();
+        // Optional parameters with defaults
+        String llmModel = getStringInput(ConnectorConstants.INPUT_LLM_MODEL);
+        if (llmModel != null && !llmModel.trim().isEmpty()) {
+            builder.llmModel(llmModel);
+        }
+        
+        Integer topK = getIntegerInput(ConnectorConstants.INPUT_TOP_K);
+        if (topK != null) {
+            builder.topK(topK);
+        }
+        
+        Double minConfidence = getDoubleInput(ConnectorConstants.INPUT_MIN_CONFIDENCE);
+        if (minConfidence != null) {
+            builder.minConfidence(minConfidence);
+        }
+        
+        Boolean requireSources = getBooleanInput(ConnectorConstants.INPUT_REQUIRE_SOURCES);
+        if (requireSources != null) {
+            builder.requireSources(requireSources);
+        }
+        
+        Integer timeoutMs = getIntegerInput(ConnectorConstants.INPUT_TIMEOUT_MS);
+        if (timeoutMs != null) {
+            builder.timeoutMs(timeoutMs);
+        }
+        
+        Integer maxTokens = getIntegerInput(ConnectorConstants.INPUT_MAX_TOKENS);
+        if (maxTokens != null) {
+            builder.maxTokens(maxTokens);
+        }
+        
+        Double temperature = getDoubleInput(ConnectorConstants.INPUT_TEMPERATURE);
+        if (temperature != null) {
+            builder.temperature(temperature);
+        }
+        
+        return builder.build();
     }
 
     /**
@@ -222,20 +277,30 @@ public class AIAgentConnector extends AbstractConnector {
      */
     private void mapResponseToOutputs(AgentResponse response) {
         setOutputParameter(ConnectorConstants.OUTPUT_STATUS, response.getStatus());
-        setOutputParameter(ConnectorConstants.OUTPUT_DATA, response.getOutput());
-        setOutputParameter(ConnectorConstants.OUTPUT_USAGE, response.getUsage());
-        setOutputParameter(ConnectorConstants.OUTPUT_ERROR, response.getError());
+        setOutputParameter(ConnectorConstants.OUTPUT_ANSWER, response.getAnswer());
+        setOutputParameter(ConnectorConstants.OUTPUT_SOURCES, response.getSources());
+        setOutputParameter(ConnectorConstants.OUTPUT_CONFIDENCE, response.getConfidence());
+        setOutputParameter(ConnectorConstants.OUTPUT_REASONING, response.getReasoning());
+        setOutputParameter(ConnectorConstants.OUTPUT_ERROR_CODE, response.getErrorCode());
+        setOutputParameter(ConnectorConstants.OUTPUT_ERROR_MESSAGE, response.getErrorMessage());
     }
 
     /**
      * Sets error outputs when request fails.
      */
-    private void setErrorOutputs(String errorMessage) {
+    private void setErrorOutputs(String errorCode, String errorMessage) {
         setOutputParameter(ConnectorConstants.OUTPUT_STATUS, ConnectorConstants.STATUS_ERROR);
-        setOutputParameter(ConnectorConstants.OUTPUT_DATA, java.util.Collections.emptyMap());
-        setOutputParameter(ConnectorConstants.OUTPUT_USAGE, java.util.Collections.emptyMap());
-        setOutputParameter(ConnectorConstants.OUTPUT_ERROR, errorMessage);
+        setOutputParameter(ConnectorConstants.OUTPUT_ANSWER, null);
+        setOutputParameter(ConnectorConstants.OUTPUT_SOURCES, Collections.emptyList());
+        setOutputParameter(ConnectorConstants.OUTPUT_CONFIDENCE, null);
+        setOutputParameter(ConnectorConstants.OUTPUT_REASONING, null);
+        setOutputParameter(ConnectorConstants.OUTPUT_ERROR_CODE, errorCode);
+        setOutputParameter(ConnectorConstants.OUTPUT_ERROR_MESSAGE, errorMessage);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INPUT HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
      * Gets a String input parameter safely.
@@ -252,6 +317,34 @@ public class AIAgentConnector extends AbstractConnector {
         Object value = getInputParameter(paramName);
         if (value instanceof Integer) {
             return (Integer) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return null;
+    }
+
+    /**
+     * Gets a Double input parameter safely.
+     */
+    private Double getDoubleInput(String paramName) {
+        Object value = getInputParameter(paramName);
+        if (value instanceof Double) {
+            return (Double) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        return null;
+    }
+
+    /**
+     * Gets a Boolean input parameter safely.
+     */
+    private Boolean getBooleanInput(String paramName) {
+        Object value = getInputParameter(paramName);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
         }
         return null;
     }
