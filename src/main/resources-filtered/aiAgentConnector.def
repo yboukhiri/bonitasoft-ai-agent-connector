@@ -13,6 +13,9 @@
     <!-- ═══════════════════════════════════════════════════════════════════════════
          CONNECTOR INPUTS
          
+         All inputs support process variable expressions (e.g., ${processVariableName}).
+         Values can be entered directly or referenced from process variables.
+         
          RAG Agent API Contract:
          - agentUrl: Agent API endpoint URL
          - authToken: JWT Bearer token for authentication
@@ -27,16 +30,16 @@
          - temperature: LLM temperature (default: 0.1)
          ═══════════════════════════════════════════════════════════════════════════ -->
     
-    <!-- Agent API URL: The endpoint URL for the RAG agent -->
+    <!-- Agent API URL: The endpoint URL for the RAG agent (supports process variable expressions) -->
     <input mandatory="true" name="agentUrl" type="java.lang.String"/>
     
-    <!-- Auth Token: JWT Bearer token for authentication (can be empty if auth disabled) -->
+    <!-- Auth Token: JWT Bearer token for authentication (supports process variable expressions, can be empty if auth disabled) -->
     <input mandatory="false" name="authToken" type="java.lang.String"/>
     
-    <!-- Question: The question to ask the RAG agent (mandatory) -->
+    <!-- Question: The question to ask the RAG agent (mandatory, supports process variable expressions) -->
     <input mandatory="true" name="question" type="java.lang.String"/>
     
-    <!-- LLM API Key: OpenAI/Anthropic API key (mandatory) -->
+    <!-- LLM API Key: OpenAI/Anthropic API key (mandatory, supports process variable expressions) -->
     <input mandatory="true" name="llmApiKey" type="java.lang.String"/>
     
     <!-- LLM Model: Model name (default: gpt-4o-mini) -->
@@ -93,5 +96,36 @@
     
     <!-- Error Message: Human-readable error message if the request failed -->
     <output name="errorMessage" type="java.lang.String"/>
+    
+    <!-- ═══════════════════════════════════════════════════════════════════════════
+         CONNECTOR UI PAGES
+         
+         Page definitions for Bonita Studio wizard UI.
+         Each widget is bound to an input via inputName attribute.
+         ═══════════════════════════════════════════════════════════════════════════ -->
+    
+    <!-- Page 1: Connection Settings -->
+    <!-- All widgets support expressions to reference process variables (e.g., ${agentUrl}, ${authToken}, ${llmApiKey}) -->
+    <page id="connectionPage">
+        <widget xsi:type="definition:Text" id="agentUrlWidget" inputName="agentUrl"/>
+        <widget xsi:type="definition:Text" id="authTokenWidget" inputName="authToken"/>
+        <widget xsi:type="definition:Text" id="llmApiKeyWidget" inputName="llmApiKey"/>
+    </page>
+    
+    <!-- Page 2: Query Settings -->
+    <page id="queryPage">
+        <widget xsi:type="definition:Text" id="questionWidget" inputName="question"/>
+        <widget xsi:type="definition:Text" id="llmModelWidget" inputName="llmModel"/>
+    </page>
+    
+    <!-- Page 3: Advanced Settings -->
+    <page id="advancedPage">
+        <widget xsi:type="definition:Text" id="topKWidget" inputName="topK"/>
+        <widget xsi:type="definition:Text" id="minConfidenceWidget" inputName="minConfidence"/>
+        <widget xsi:type="definition:Text" id="requireSourcesWidget" inputName="requireSources"/>
+        <widget xsi:type="definition:Text" id="timeoutMsWidget" inputName="timeoutMs"/>
+        <widget xsi:type="definition:Text" id="maxTokensWidget" inputName="maxTokens"/>
+        <widget xsi:type="definition:Text" id="temperatureWidget" inputName="temperature"/>
+    </page>
     
 </definition:ConnectorDefinition>

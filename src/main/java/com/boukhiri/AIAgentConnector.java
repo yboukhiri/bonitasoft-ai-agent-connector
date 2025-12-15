@@ -304,6 +304,13 @@ public class AIAgentConnector extends AbstractConnector {
 
     /**
      * Gets a String input parameter safely.
+     * 
+     * <p>This method retrieves input parameters that may contain process variable
+     * expressions (e.g., ${processVariableName}). Bonita automatically evaluates
+     * these expressions before passing values to the connector.</p>
+     * 
+     * @param paramName The name of the input parameter
+     * @return The string value, or null if not provided
      */
     private String getStringInput(String paramName) {
         Object value = getInputParameter(paramName);
@@ -312,6 +319,12 @@ public class AIAgentConnector extends AbstractConnector {
 
     /**
      * Gets an Integer input parameter safely.
+     * 
+     * <p>Process variable expressions are automatically evaluated by Bonita
+     * before values are passed to this method.</p>
+     * 
+     * @param paramName The name of the input parameter
+     * @return The integer value, or null if not provided or not a number
      */
     private Integer getIntegerInput(String paramName) {
         Object value = getInputParameter(paramName);
@@ -326,6 +339,12 @@ public class AIAgentConnector extends AbstractConnector {
 
     /**
      * Gets a Double input parameter safely.
+     * 
+     * <p>Process variable expressions are automatically evaluated by Bonita
+     * before values are passed to this method.</p>
+     * 
+     * @param paramName The name of the input parameter
+     * @return The double value, or null if not provided or not a number
      */
     private Double getDoubleInput(String paramName) {
         Object value = getInputParameter(paramName);
@@ -340,6 +359,12 @@ public class AIAgentConnector extends AbstractConnector {
 
     /**
      * Gets a Boolean input parameter safely.
+     * 
+     * <p>Process variable expressions are automatically evaluated by Bonita
+     * before values are passed to this method.</p>
+     * 
+     * @param paramName The name of the input parameter
+     * @return The boolean value, or null if not provided or not a boolean
      */
     private Boolean getBooleanInput(String paramName) {
         Object value = getInputParameter(paramName);
